@@ -83,12 +83,15 @@ namespace Lidgren.Network
 
 		/// <summary>
 		/// Writes a boolean value using 1 bit
+        /// <returns>value written</returns>
 		/// </summary>
-		public void Write(bool value)
+		public bool Write(bool value)
 		{
 			EnsureBufferSize(m_bitLength + 1);
 			NetBitWriter.WriteByte((value ? (byte)1 : (byte)0), 1, m_data, m_bitLength);
 			m_bitLength += 1;
+
+		    return value;
 		}
 
 		/// <summary>
