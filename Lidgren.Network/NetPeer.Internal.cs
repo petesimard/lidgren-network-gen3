@@ -69,15 +69,8 @@ namespace Lidgren.Network
 				return;
 
 			// remove all callbacks regardless of sync context
-		RestartRemoveCallbacks:
-			for (int i = 0; i < m_receiveCallbacks.Count; i++)
-			{
-				if (m_receiveCallbacks[i].Item2.Equals(callback))
-				{
-					m_receiveCallbacks.RemoveAt(i);
-					goto RestartRemoveCallbacks;
-				}
-			}
+            m_receiveCallbacks.RemoveAll(tuple => tuple.Item2.Equals(callback));
+
 			if (m_receiveCallbacks.Count < 1)
 				m_receiveCallbacks = null;
 		}
@@ -127,7 +120,7 @@ namespace Lidgren.Network
 				m_socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
 
 			if (reBind)
-				m_socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, (int)1); 
+				m_socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, (int)1);
 
 			m_socket.ReceiveBufferSize = m_configuration.ReceiveBufferSize;
 			m_socket.SendBufferSize = m_configuration.SendBufferSize;
@@ -232,18 +225,18 @@ namespace Lidgren.Network
 				foreach (var conn in m_connections)
 					if (conn != null)
 						list.Add(conn);
-
-				lock (m_handshakes)
-				{
-					foreach (var hs in m_handshakes.Values)
-						if (hs != null)
-							list.Add(hs);
-
-					// shut down connections
-					foreach (NetConnection conn in list)
-						conn.Shutdown(m_shutdownReason);
-				}
 			}
+
+			lock (m_handshakes)
+			{
+				foreach (var hs in m_handshakes.Values)
+					if (hs != null && list.Contains(hs) == false)
+						list.Add(hs);
+			}
+
+			// shut down connections
+			foreach (NetConnection conn in list)
+				conn.Shutdown(m_shutdownReason);
 
 			FlushDelayedPackets();
 
@@ -251,7 +244,7 @@ namespace Lidgren.Network
 			Heartbeat();
 
 			NetUtility.Sleep(10);
-			
+
 			lock (m_initializeLock)
 			{
 				try
@@ -389,6 +382,9 @@ namespace Lidgren.Network
 				}
 			}
 
+            if (m_upnp != null)
+                m_upnp.CheckForDiscoveryTimeout();
+
 			//
 			// read from socket
 			//
@@ -416,7 +412,7 @@ namespace Lidgren.Network
 					switch (sx.SocketErrorCode)
 					{
 						case SocketError.ConnectionReset:
-							// connection reset by peer, aka connection forcibly closed aka "ICMP port unreachable" 
+							// connection reset by peer, aka connection forcibly closed aka "ICMP port unreachable"
 							// we should shut down the connection; but m_senderRemote seemingly cannot be trusted, so which connection should we shut down?!
 							// So, what to do?
 							LogWarning("ConnectionReset");
@@ -443,7 +439,7 @@ namespace Lidgren.Network
 				if (m_upnp != null && now < m_upnp.m_discoveryResponseDeadline && bytesReceived > 32)
 				{
 					// is this an UPnP response?
-					string resp = System.Text.Encoding.ASCII.GetString(m_receiveBuffer, 0, bytesReceived);
+					string resp = System.Text.Encoding.UTF8.GetString(m_receiveBuffer, 0, bytesReceived);
 					if (resp.Contains("upnp:rootdevice") || resp.Contains("UPnP/1.0"))
 					{
 						try
@@ -490,7 +486,8 @@ namespace Lidgren.Network
 					bool isFragment = ((low & 1) == 1);
 					ushort sequenceNumber = (ushort)((low >> 1) | (((int)high) << 7));
 
-					numFragments++;
+					if (isFragment)
+						numFragments++;
 
 					ushort payloadBitLength = (ushort)(m_receiveBuffer[ptr++] | (m_receiveBuffer[ptr++] << 8));
 					int payloadByteLength = NetUtility.BytesToHoldBits(payloadBitLength);
@@ -631,6 +628,14 @@ namespace Lidgren.Network
 				case NetMessageType.NatPunchMessage:
 					if (m_configuration.IsMessageTypeEnabled(NetIncomingMessageType.NatIntroductionSuccess))
 						HandleNatPunch(ptr, senderEndPoint);
+					return;
+				case NetMessageType.NatIntroductionConfirmRequest:
+					if (m_configuration.IsMessageTypeEnabled(NetIncomingMessageType.NatIntroductionSuccess))
+						HandleNatPunchConfirmRequest(ptr, senderEndPoint);
+					return;
+				case NetMessageType.NatIntroductionConfirmed:
+					if (m_configuration.IsMessageTypeEnabled(NetIncomingMessageType.NatIntroductionSuccess))
+						HandleNatPunchConfirmed(ptr, senderEndPoint);
 					return;
 				case NetMessageType.ConnectResponse:
 

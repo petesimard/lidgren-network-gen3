@@ -12,7 +12,7 @@ namespace Lidgren.Network
 	/// <summary>
 	/// Represents a connection to a remote peer
 	/// </summary>
-	[DebuggerDisplay("RemoteUniqueIdentifier={RemoteUniqueIdentifier} RemoteEndPoint={remoteEndPoint}")]
+	[DebuggerDisplay("RemoteUniqueIdentifier={RemoteUniqueIdentifier} RemoteEndPoint={m_remoteEndPoint}")]
 	public partial class NetConnection
 	{
 		private const int m_infrequentEventsSkipFrames = 8; // number of heartbeats to skip checking for infrequent events (ping, timeout etc)
@@ -20,8 +20,9 @@ namespace Lidgren.Network
 
 		internal NetPeer m_peer;
 		internal NetPeerConfiguration m_peerConfiguration;
-		internal NetConnectionStatus m_status;
-		internal NetConnectionStatus m_visibleStatus;
+		internal NetConnectionStatus m_status; // actual status
+		internal NetConnectionStatus m_outputtedStatus; // status that has been sent as StatusChanged message
+		internal NetConnectionStatus m_visibleStatus; // status visible by querying the Status property
 		internal NetEndPoint m_remoteEndPoint;
 		internal NetSenderChannelBase[] m_sendChannels;
 		internal NetReceiverChannelBase[] m_receiveChannels;
@@ -87,6 +88,7 @@ namespace Lidgren.Network
 			m_peer = peer;
 			m_peerConfiguration = m_peer.Configuration;
 			m_status = NetConnectionStatus.None;
+			m_outputtedStatus = NetConnectionStatus.None;
 			m_visibleStatus = NetConnectionStatus.None;
 			m_remoteEndPoint = remoteEndPoint;
 			m_sendChannels = new NetSenderChannelBase[NetConstants.NumTotalChannels];
@@ -115,9 +117,6 @@ namespace Lidgren.Network
 		{
 			// user or library thread
 
-			if (status == m_status)
-				return;
-
 			m_status = status;
 			if (reason == null)
 				reason = string.Empty;
@@ -130,16 +129,21 @@ namespace Lidgren.Network
 
 			if (m_peerConfiguration.IsMessageTypeEnabled(NetIncomingMessageType.StatusChanged))
 			{
-				NetIncomingMessage info = m_peer.CreateIncomingMessage(NetIncomingMessageType.StatusChanged, 4 + reason.Length + (reason.Length > 126 ? 2 : 1));
-				info.m_senderConnection = this;
-				info.m_senderEndPoint = m_remoteEndPoint;
-				info.Write((byte)m_status);
-				info.Write(reason);
-				m_peer.ReleaseMessage(info);
+				if (m_outputtedStatus != status)
+				{
+					NetIncomingMessage info = m_peer.CreateIncomingMessage(NetIncomingMessageType.StatusChanged, 4 + reason.Length + (reason.Length > 126 ? 2 : 1));
+					info.m_senderConnection = this;
+					info.m_senderEndPoint = m_remoteEndPoint;
+					info.Write((byte)m_status);
+					info.Write(reason);
+					m_peer.ReleaseMessage(info);
+					m_outputtedStatus = status;
+				}
 			}
 			else
 			{
 				// app dont want those messages, update visible status immediately
+				m_outputtedStatus = m_status;
 				m_visibleStatus = m_status;
 			}
 		}
@@ -264,7 +268,7 @@ namespace Lidgren.Network
 					if (channel != null)
 					{
 						channel.SendQueuedMessages(now);
-						if (channel.QueuedSendsCount > 0)
+						if (channel.NeedToSendMessages())
 							m_peer.m_needFlushSendQueue = true; // failed to send all queued sends; likely a full window - need to try again
 					}
 					NetException.Assert(m_sendBufferWritePtr < 1 || m_sendBufferNumMessages > 0);

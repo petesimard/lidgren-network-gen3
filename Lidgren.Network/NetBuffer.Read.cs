@@ -315,7 +315,7 @@ namespace Lidgren.Network
 			else
 			{
 				retval = NetBitWriter.ReadUInt32(m_data, 32, m_readPosition);
-				retval |= NetBitWriter.ReadUInt32(m_data, numberOfBits - 32, m_readPosition) << 32;
+				retval |= (UInt64)NetBitWriter.ReadUInt32(m_data, numberOfBits - 32, m_readPosition + 32) << 32;
 			}
 			m_readPosition += numberOfBits;
 			return retval;
@@ -547,6 +547,21 @@ namespace Lidgren.Network
 			uint rvalue = ReadUInt32(numBits);
 			return (int)(min + rvalue);
 		}
+
+	        /// <summary>
+	        /// Reads a 64 bit integer value written using WriteRangedInteger() (64 version)
+	        /// </summary>
+	        /// <param name="min">The minimum value used when writing the value</param>
+	        /// <param name="max">The maximum value used when writing the value</param>
+	        /// <returns>A signed integer value larger or equal to MIN and smaller or equal to MAX</returns>
+	        public long ReadRangedInteger(long min, long max)
+	        {
+	            ulong range = (ulong)(max - min);
+	            int numBits = NetUtility.BitsToHoldUInt64(range);
+	
+	            ulong rvalue = ReadUInt64(numBits);
+	            return min + (long)rvalue;
+	        }
 
 		/// <summary>
 		/// Reads a string written using Write(string)
